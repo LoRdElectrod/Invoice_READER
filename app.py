@@ -56,7 +56,8 @@ def process_image():
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Extract all text from the invoice. Don't give any details, just the text."},
+                        {"type": "text", "text": "Extract the Text in the invoice but in three parts. I want you to give separate headings to the three parts as Complete Text, Product Names, and Dates. Complete text should be in raw formating, but "
+                        "product/item names must be in list format. Include only the dates present in the invoice in the Dates column not any other numbers in the format (dd-mm-yyy). Make the headings bold. "},
                         {"type": "image_url", "image_url": {"url": uploaded_image_url}}
                     ]
                 }
