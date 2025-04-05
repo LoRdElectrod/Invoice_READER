@@ -3,3 +3,4 @@ together
 requests
 dotenv
 mysql-connector-python
+gunicorn
