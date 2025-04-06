@@ -32,31 +32,41 @@ def upload_to_imgur(image_path):
 
 # Extract dates from text using regex
 def extract_dates(text):
-    date_patterns = [
-        r'\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b',
-        r'\b(\d{1,2})[/-](\d{4})\b',
-        r'\b(\d{4})[/-](\d{1,2})\b',
-    ]
     found_dates = []
 
-    for pattern in date_patterns:
-        matches = re.findall(pattern, text)
-        for match in matches:
-            if len(match) == 3:
-                dd, mm, yyyy = match
-            elif len(match) == 2 and len(match[1]) == 4:  # mm-yyyy
-                dd, mm, yyyy = "01", match[0], match[1]
-            elif len(match[0]) == 4:  # yyyy-mm
-                dd, mm, yyyy = "01", match[1], match[0]
+    # Patterns:
+    # 1. DD/MM/YYYY or DD-MM-YYYY
+    # 2. MM/YYYY or MM-YY (interpreted as 01-MM-YYYY)
+    # 3. M/YY or MM/YY → assume 01-MM-20YY
+    # 4. YYYY-MM or YYYY/MM → assume 01-MM-YYYY
+    patterns = [
+        r'\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b',  # 12/03/2021 or 3/4/21
+        r'\b(\d{1,2})[/-](\d{2})\b',                 # 4/26 → MM/YY
+        r'\b(\d{4})[/-](\d{1,2})\b'                  # 2021/03 → YYYY-MM
+    ]
+
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            parts = match.groups()
+            if len(parts) == 3:
+                dd, mm, yyyy = parts
+                if int(dd) > 31:  # Likely YYYY-MM-DD but reversed
+                    dd, mm, yyyy = "01", mm, dd
+                if len(yyyy) == 2:
+                    yyyy = "20" + yyyy
+                dd = dd.zfill(2)
+                mm = mm.zfill(2)
+            elif len(parts) == 2:
+                mm, yy = parts
+                dd = "01"
+                mm = mm.zfill(2)
+                yyyy = "20" + yy
             else:
                 continue
 
-            dd = dd.zfill(2)
-            mm = mm.zfill(2)
-            yyyy = yyyy if len(yyyy) == 4 else "20" + yyyy
-            formatted_date = f"{dd}-{mm}-{yyyy}"
-            if formatted_date not in found_dates:
-                found_dates.append(formatted_date)
+            formatted = f"{dd}-{mm}-{yyyy}"
+            if formatted not in found_dates:
+                found_dates.append(formatted)
 
     return found_dates
 
@@ -110,11 +120,11 @@ def process_image():
         response_text = response.choices[0].message.content if response.choices else ""
         logging.info(f"LLM Response:\n{response_text}")
 
-        # Initialize fallback values
+        # Fallback values
         extracted_text = ""
         product_names = []
 
-        # Try multiple ways to parse
+        # Parse the LLM response
         patterns = [
             r"\*\*Extracted Text:\*\*(.*?)\*\*Product Names \(JSON\):\*\*(.*)",
             r"1\. Extracted Text:(.*?)2\. Product Names \(JSON\):(.*)"
@@ -124,8 +134,12 @@ def process_image():
             match = re.search(pattern, response_text, re.DOTALL)
             if match:
                 extracted_text = match.group(1).strip()
-                product_json = json.loads(match.group(2).strip())
-                product_names = [item["product"] for item in product_json if "product" in item]
+                try:
+                    product_json = json.loads(match.group(2).strip())
+                    product_names = [item["product"] for item in product_json if "product" in item]
+                except Exception as e:
+                    logging.warning("Error parsing product JSON: %s", e)
+                    product_names = []
                 break
         else:
             logging.warning("Expected pattern not found in LLM output.")
@@ -141,6 +155,6 @@ def process_image():
     except Exception as e:
         logging.exception("Error in processing image")
         return jsonify({"error": str(e)}), 500
-    
+
 if __name__ == '__main__':
     app.run()
