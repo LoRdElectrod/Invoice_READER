@@ -34,39 +34,47 @@ def upload_to_imgur(image_path):
 def extract_dates(text):
     found_dates = []
 
-    # Patterns:
-    # 1. DD/MM/YYYY or DD-MM-YYYY
-    # 2. MM/YYYY or MM-YY (interpreted as 01-MM-YYYY)
-    # 3. M/YY or MM/YY → assume 01-MM-20YY
-    # 4. YYYY-MM or YYYY/MM → assume 01-MM-YYYY
     patterns = [
-        r'\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b',  # 12/03/2021 or 3/4/21
-        r'\b(\d{1,2})[/-](\d{2})\b',                 # 4/26 → MM/YY
-        r'\b(\d{4})[/-](\d{1,2})\b'                  # 2021/03 → YYYY-MM
+        r'\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b',  # DD/MM/YYYY or D-M-YY
+        r'\b(\d{1,2})[/-](\d{2})\b',                 # MM/YY
+        r'\b(\d{4})[/-](\d{1,2})\b'                  # YYYY/MM
     ]
 
     for pattern in patterns:
         for match in re.finditer(pattern, text):
             parts = match.groups()
-            if len(parts) == 3:
-                dd, mm, yyyy = parts
-                if int(dd) > 31:  # Likely YYYY-MM-DD but reversed
-                    dd, mm, yyyy = "01", mm, dd
-                if len(yyyy) == 2:
-                    yyyy = "20" + yyyy
-                dd = dd.zfill(2)
-                mm = mm.zfill(2)
-            elif len(parts) == 2:
-                mm, yy = parts
-                dd = "01"
-                mm = mm.zfill(2)
-                yyyy = "20" + yy
-            else:
-                continue
 
-            formatted = f"{dd}-{mm}-{yyyy}"
-            if formatted not in found_dates:
-                found_dates.append(formatted)
+            try:
+                if len(parts) == 3:
+                    dd, mm, yyyy = parts
+                    if int(dd) > 31:
+                        dd, mm, yyyy = "01", mm, dd  # Maybe reversed
+                    if len(yyyy) == 2:
+                        yyyy = "20" + yyyy
+                    dd = dd.zfill(2)
+                    mm = mm.zfill(2)
+
+                elif len(parts) == 2:
+                    mm, yy = parts
+                    dd = "01"
+                    mm = mm.zfill(2)
+                    yyyy = "20" + yy
+
+                else:
+                    continue
+
+                # Basic sanity checks
+                if not (1 <= int(mm) <= 12):
+                    continue
+                if not (1900 <= int(yyyy) <= 2100):
+                    continue
+
+                formatted = f"{dd}-{mm}-{yyyy}"
+                if formatted not in found_dates:
+                    found_dates.append(formatted)
+
+            except Exception:
+                continue  # Skip invalid matches
 
     return found_dates
 
@@ -87,15 +95,21 @@ def process_image():
 
         uploaded_image_url = upload_to_imgur(image_path)
 
+        # Expanded prompt to detect varied headers like product names, item names, medicine name, etc.
         prompt = (
-            "Extract the full raw text from this invoice image first.\n\n"
-            "Then, identify all product or medicine names listed under the items/products section, "
-            "and return ONLY their names in a separate section as a JSON array like this:\n\n"
-            "[ { \"product\": \"Product Name 1\" }, { \"product\": \"Product Name 2\" } ]\n\n"
-            "Only include actual item names. Do NOT include prices, quantities, batch numbers, etc.\n\n"
-            "Format your response in two parts:\n\n"
-            "1. Extracted Text:\n<Full invoice text here>\n\n"
-            "2. Product Names (JSON):\n[ { \"product\": \"Product 1\" }, { \"product\": \"Product 2\" } ]"
+            "You are analyzing a medical invoice or bill image. First, extract the full raw text from the image.\n\n"
+            "Then, look for the section containing the itemized list of medicines or products. The section may be under headers like:\n"
+            "- Item\n"
+            "- Product\n"
+            "- Product Name\n"
+            "- Item Name\n"
+            "- Medicine Name\n"
+            "- Description\n\n"
+            "From that section, extract only the product/medicine names (not quantities, batch numbers, prices, or codes).\n\n"
+            "Return your output in two parts:\n\n"
+            "1. Extracted Text:\n<Full text here>\n\n"
+            "2. Product Names (JSON):\n[ { \"product\": \"Product 1\" }, { \"product\": \"Product 2\" } ]\n\n"
+            "Only list unique names of products/medicines."
         )
 
         response = client.chat.completions.create(
@@ -120,11 +134,9 @@ def process_image():
         response_text = response.choices[0].message.content if response.choices else ""
         logging.info(f"LLM Response:\n{response_text}")
 
-        # Fallback values
         extracted_text = ""
         product_names = []
 
-        # Parse the LLM response
         patterns = [
             r"\*\*Extracted Text:\*\*(.*?)\*\*Product Names \(JSON\):\*\*(.*)",
             r"1\. Extracted Text:(.*?)2\. Product Names \(JSON\):(.*)"
@@ -158,3 +170,4 @@ def process_image():
 
 if __name__ == '__main__':
     app.run()
+    
