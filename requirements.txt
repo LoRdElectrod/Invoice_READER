@@ -1,6 +1,4 @@
 opencv-python-headless
-paddleocr
-paddlepaddle
 flask
 together
 requests
