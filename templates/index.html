@@ -17,6 +17,10 @@
       </button>
     </form>
 
+    <div class="flex items-center justify-center h-screen" id="spinner" style="display:none;">
+      <div class="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+    </div>
+
     <div id="output" class="space-y-6 hidden">
       <div class="border rounded p-4 bg-gray-50">
         <h2 class="text-xl font-semibold mb-2 text-blue-700">📝 Extracted Text</h2>
@@ -44,16 +48,21 @@
     document.getElementById("upload-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const formData = new FormData(e.target);
+
+
+        document.getElementById("spinner").style.display = "block";
       
       const res = await fetch("/process_image", {
         method: "POST",
         body: formData,
       });
+        document.getElementById("spinner").style.display = "none";
 
       const data = await res.json();
       document.getElementById("output").classList.remove("hidden");
+      console.log(data);
 
-      document.getElementById("extracted-text").textContent = data.extracted_text || "No text extracted";
+        document.getElementById("extracted-text").textContent = JSON.stringify(data.extracted_text) || "No text extracted";
 
       const productsList = document.getElementById("product-names");
       productsList.innerHTML = "";

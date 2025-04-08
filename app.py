@@ -6,6 +6,11 @@ from together import Together
 from dotenv import load_dotenv
 import re
 import json
+import cv2
+from PIL import Image 
+import io
+from paddleocr import PaddleOCR
+import numpy as np
 
 # Load environment variables
 load_dotenv()
@@ -20,17 +25,45 @@ app = Flask(__name__, template_folder="templates")
 # Enable logging
 logging.basicConfig(level=logging.INFO)
 
+# Retry if output is not JSON
+maxretry = 10
+
+# Process Image before applying OCR
+def image_process(file_bytes):
+    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+    gray = cv2.bilateralFilter(gray, 10, 15, 20)
+    # gray = cv2.equalizeHist(gray)
+    return Image.fromarray(gray)
+
 # Upload image to Imgur
-def upload_to_imgur(image_path):
+def upload_to_imgur(image_bytes):
     headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
-    with open(image_path, "rb") as image_file:
-        response = requests.post("https://api.imgur.com/3/upload", headers=headers, files={"image": image_file})
+    # with open(image_path, "rb") as image_file:
+    response = requests.post("https://api.imgur.com/3/upload", headers=headers, files={"image": image_bytes})
     if response.status_code == 200:
         return response.json()["data"]["link"]
     else:
         raise Exception(f"Imgur upload failed: {response.json()}")
 
 # Extract dates from text using regex
+
+
+
+def image_to_ocr(image):
+
+    image.show()
+    ocr = PaddleOCR(use_angle_cls=True, lang='en')  # 'en' for English
+
+    results = ocr.ocr(np.array(image), cls=True)
+    text = ""
+
+    for line in results[0]:
+      text = text + line[1][0] + "\n"
+    return text
+
+
 def extract_dates(text):
     found_dates = []
 
@@ -78,6 +111,24 @@ def extract_dates(text):
 
     return found_dates
 
+
+
+def contains_json(text):
+    try:
+        json.loads(text)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+def extract_first_json(text):
+    matches = re.findall(r'\{.*?\}', text)
+    for match in matches:
+        try:
+            return json.loads(match)  
+        except json.JSONDecodeError:
+            continue
+    return None  
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -89,85 +140,106 @@ def process_image():
             return jsonify({"error": "No image file provided"}), 400
 
         image_file = request.files['image']
-        image_path = f"./temp/{image_file.filename}"
-        os.makedirs("./temp", exist_ok=True)
-        image_file.save(image_path)
+        file_bytes = np.frombuffer(image_file.read(), np.uint8)
 
-        uploaded_image_url = upload_to_imgur(image_path)
+        image = image_process(file_bytes)
 
-        # Expanded prompt to detect varied headers like product names, item names, medicine name, etc.
-        prompt = (
-            "You are analyzing a medical invoice or bill image. First, extract the full raw text from the image.\n\n"
-            "Then, look for the section containing the itemized list of medicines or products. The section may be under headers like:\n"
-            "- Item\n"
-            "- Product\n"
-            "- Product Name\n"
-            "- Item Name\n"
-            "- Medicine Name\n"
-            "- Description\n\n"
-            "From that section, extract only the product/medicine names (not quantities, batch numbers, prices, or codes).\n\n"
-            "Return your output in two parts:\n\n"
-            "1. Extracted Text:\n<Full text here>\n\n"
-            "2. Product Names (JSON):\n[ { \"product\": \"Product 1\" }, { \"product\": \"Product 2\" } ]\n\n"
-            "Only list unique names of products/medicines."
-        )
+        # Converting processed image to bytes for uploading
+        image_bytes = io.BytesIO()
+        image.save(image_bytes, format="PNG")
+        image_bytes.seek(0)
 
-        response = client.chat.completions.create(
-            model="meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
-            messages=[
+        text = image_to_ocr(image)        
+
+        uploaded_image_url = upload_to_imgur(image_bytes)
+
+        retry = 0
+
+        while(retry < maxretry):
+
+            prompt = (
+                """
+                You are an intelligent OCR post-processor.
+
+                Given a list of text blocks extracted from an invoice, identify and extract a list of medicines.
+
+                Input:
+                """
+                + "\n" + text +"\n" + 
+                """
+                Also use Provided image as context.
+                Check columns in image with "Item", "Product", "Product Name", "Medicine Name", "Description".
+
+                
+                Do not include markdown, do not wrap with triple backticks, no explanations,
+                Respond ONLY with a JSON object in the following format:
                 {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": uploaded_image_url}}
-                    ]
+                  "medicines": [
+                    "name",
+                  ],
+                  "invoice_date": "date"
                 }
-            ],
-            max_tokens=None,
-            temperature=0.7,
-            top_p=0.7,
-            top_k=50,
-            repetition_penalty=1,
-            stop=["<|eot_id|>", "<|eom_id|>"]
-        )
 
-        response_text = response.choices[0].message.content if response.choices else ""
-        logging.info(f"LLM Response:\n{response_text}")
+                """
+                + ("Only JSON " * retry) + 
 
-        extracted_text = ""
-        product_names = []
+                """
+                If there are No Medicines mentioned, just response with empty JSON, like this:
+                {}
+                """
+            )
 
-        patterns = [
-            r"\*\*Extracted Text:\*\*(.*?)\*\*Product Names \(JSON\):\*\*(.*)",
-            r"1\. Extracted Text:(.*?)2\. Product Names \(JSON\):(.*)"
-        ]
+            response = client.chat.completions.create(
+                model="meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": uploaded_image_url}}
+                        ]
+                    }
+                ],
+                max_tokens=None,
+                temperature=0.7,
+                top_p=0.7,
+                top_k=50,
+                repetition_penalty=1,
+                stop=["<|eot_id|>", "<|eom_id|>"]
+            )
 
-        for pattern in patterns:
-            match = re.search(pattern, response_text, re.DOTALL)
-            if match:
-                extracted_text = match.group(1).strip()
-                try:
-                    product_json = json.loads(match.group(2).strip())
-                    product_names = [item["product"] for item in product_json if "product" in item]
-                except Exception as e:
-                    logging.warning("Error parsing product JSON: %s", e)
-                    product_names = []
-                break
-        else:
-            logging.warning("Expected pattern not found in LLM output.")
+            response_text = response.choices[0].message.content if response.choices else ""
+            logging.info(f"LLM Response:\n{response_text}")
+            print(response_text)
 
-        extracted_dates = extract_dates(extracted_text)
+
+            if contains_json(response_text) is not True:
+                retry = retry + 1
+                logging.info(f"Retrying {retry}\n")
+                print("retrying "+str(retry))
+                continue
+
+            extracted_json = json.loads(response_text);
+
+            return jsonify({
+               "extracted_text": extracted_json,
+            })
+
+            break
 
         return jsonify({
-            "extracted_text": extracted_text,
-            "product_names": product_names,
-            "dates": extracted_dates
+            "extracted_text": "",
         })
+
 
     except Exception as e:
         logging.exception("Error in processing image")
-        return jsonify({"error": str(e)}), 500
+        # return jsonify({"error": str(e)}), 500
+
 
 if __name__ == '__main__':
     app.run()
-    
+    # process_image()
+
+
+
