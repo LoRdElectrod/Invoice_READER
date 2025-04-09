@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 
-# Update the apt package list
-apt-get update
+# Install system-level dependencies
+apt-get update && apt-get install -y libgl1-mesa-glx libglib2.0-0 libgomp1
 
-# Install system dependencies (like libgomp1)
-apt-get install -y libgomp1
-
-# Install all Python packages
+# Install Python dependencies
+pip install --upgrade pip
 pip install -r requirements.txt
