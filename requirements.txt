@@ -6,5 +6,4 @@ dotenv
 mysql-connector-python
 gunicorn
 fuzzywuzzy
-paddleocr
-paddlepaddle
+
