@@ -26,7 +26,7 @@ app = Flask(__name__, template_folder="templates")
 logging.basicConfig(level=logging.INFO)
 
 # Retry if output is not JSON
-maxretry = 10
+maxretry = 15
 
 # Process Image before applying OCR
 def image_process(file_bytes):

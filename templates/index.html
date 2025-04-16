@@ -50,46 +50,45 @@
       const formData = new FormData(e.target);
 
 
-        document.getElementById("spinner").style.display = "block";
+      document.getElementById("spinner").style.display = "block";
       
       const res = await fetch("/process_image", {
         method: "POST",
         body: formData,
       });
-        document.getElementById("spinner").style.display = "none";
+      document.getElementById("spinner").style.display = "none";
 
       const data = await res.json();
       document.getElementById("output").classList.remove("hidden");
       console.log(data);
 
-        document.getElementById("extracted-text").textContent = JSON.stringify(data.extracted_text) || "No text extracted";
+      document.getElementById("extracted-text").textContent = JSON.stringify(data.extracted_text) || "No text extracted";
 
       const productsList = document.getElementById("product-names");
       productsList.innerHTML = "";
-      (data.product_names || []).forEach(name => {
-        const li = document.createElement("li");
-        li.textContent = name;
-        productsList.appendChild(li);
+
+      const medicines = data.extracted_text?.medicines;
+      const keys = Object.keys(medicines);
+      products = ""
+      keys.forEach(k=>{
+          products = products + `<li>${medicines[k]}</li> `;
       });
-      if (data.product_names.length === 0) {
+      if (keys.length == 0) {
         productsList.innerHTML = "<li>No products found</li>";
       }
-
-      const datesList = document.getElementById("dates");
-      datesList.innerHTML = "";
-      (data.dates || []).forEach(date => {
-        const li = document.createElement("li");
-        li.textContent = date;
-        datesList.appendChild(li);
-      });
-      if (data.dates.length === 0) {
-        datesList.innerHTML = "<li>No dates found</li>";
+      else{
+          productsList.innerHTML = products;
       }
+
+      const invoice_dates = document.getElementById("dates");
+      console.log(data.extracted_text?.invoice_date);
+      invoice_dates.append(data.extracted_text?.invoice_date);
+
 
       const jsonOutput = {
         extracted_text: data.extracted_text || "",
-        product_names: data.product_names || [],
-        dates: data.dates || [],
+        product_names: data.extracted_text.medicines || {},
+        dates: data.extracted_text.invoice_date || {},
       };
       document.getElementById("json-output").textContent = JSON.stringify(jsonOutput, null, 2);
     });
