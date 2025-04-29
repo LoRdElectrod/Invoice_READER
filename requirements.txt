@@ -1,4 +1,4 @@
-opencv-python-headless==4.9.0.80
+opencv-python-headless
 flask
 together
 requests
@@ -6,4 +6,7 @@ dotenv
 mysql-connector-python
 gunicorn
 fuzzywuzzy
+paddlepaddle
 paddleocr
+dropbox
+setuptools
