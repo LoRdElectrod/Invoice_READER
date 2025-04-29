@@ -7,7 +7,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 text-gray-800 font-sans min-h-screen p-4">
-  <div class="max-w-4xl mx-auto bg-white shadow-lg rounded-xl p-6 mt-8">
+  <div class="max-w-5xl mx-auto bg-white shadow-lg rounded-xl p-6 mt-8">
     <h1 class="text-3xl font-bold mb-4 text-center">Invoice Processor</h1>
     
     <form id="upload-form" class="flex flex-col md:flex-row items-center gap-4 mb-6" enctype="multipart/form-data">
@@ -17,29 +17,55 @@
       </button>
     </form>
 
-    <div class="flex items-center justify-center h-screen" id="spinner" style="display:none;">
+    <div class="flex items-center justify-center h-16" id="spinner" style="display:none;">
       <div class="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+      <p class="ml-4 text-gray-600">Processing invoice, please wait...</p>
     </div>
 
-    <div id="output" class="space-y-6 hidden">
-      <div class="border rounded p-4 bg-gray-50">
-        <h2 class="text-xl font-semibold mb-2 text-blue-700">📝 Extracted Text</h2>
-        <pre id="extracted-text" class="whitespace-pre-wrap text-sm"></pre>
+    <div id="output" class="hidden">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <!-- Product Names Column -->
+        <div class="border rounded p-4 bg-gray-50">
+          <h2 class="text-xl font-semibold mb-2 text-green-700">📦 Product Names</h2>
+          <ul id="product-names" class="list-disc pl-5 text-sm overflow-auto max-h-80"></ul>
+        </div>
+
+        <!-- Dates Column -->
+        <div class="border rounded p-4 bg-gray-50">
+          <h2 class="text-xl font-semibold mb-2 text-purple-700">📅 Dates</h2>
+          
+          <div class="mb-2">
+            <h3 class="font-medium text-purple-600">Invoice Date:</h3>
+            <p id="invoice-date" class="ml-4 text-sm"></p>
+          </div>
+          
+          <div>
+            <h3 class="font-medium text-purple-600">Other Dates:</h3>
+            <ul id="other-dates" class="list-disc pl-5 text-sm"></ul>
+          </div>
+        </div>
+
+        <!-- Extracted Text Column -->
+        <div class="border rounded p-4 bg-gray-50">
+          <h2 class="text-xl font-semibold mb-2 text-blue-700">📝 Extracted Text</h2>
+          <div id="extracted-text" class="text-sm overflow-auto max-h-80 whitespace-pre-wrap"></div>
+        </div>
       </div>
 
+      <!-- JSON Output (Hidden by default) -->
       <div class="border rounded p-4 bg-gray-50">
-        <h2 class="text-xl font-semibold mb-2 text-green-700">📦 Product Names</h2>
-        <ul id="product-names" class="list-disc pl-5 text-sm"></ul>
+        <div class="flex justify-between items-center mb-2">
+          <h2 class="text-xl font-semibold text-gray-700">🧾 JSON Output</h2>
+          <button id="toggle-json" class="text-sm bg-gray-200 px-2 py-1 rounded hover:bg-gray-300">Show/Hide</button>
+        </div>
+        <pre id="json-output" class="whitespace-pre-wrap text-xs bg-white border rounded p-2 overflow-auto max-h-80 hidden"></pre>
       </div>
-
-      <div class="border rounded p-4 bg-gray-50">
-        <h2 class="text-xl font-semibold mb-2 text-purple-700">📅 Dates (dd-mm-yyyy)</h2>
-        <ul id="dates" class="list-disc pl-5 text-sm"></ul>
-      </div>
-
-      <div class="border rounded p-4 bg-gray-50">
-        <h2 class="text-xl font-semibold mb-2 text-gray-700">🧾 JSON Output</h2>
-        <pre id="json-output" class="whitespace-pre-wrap text-xs bg-white border rounded p-2"></pre>
+      
+      <!-- Download Text Button -->
+      <div class="mt-4 flex justify-end">
+        <button id="download-text" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition">
+          Download Extracted Text
+        </button>
       </div>
     </div>
   </div>
@@ -49,49 +75,90 @@
       e.preventDefault();
       const formData = new FormData(e.target);
 
+      document.getElementById("spinner").style.display = "flex";
+      document.getElementById("output").classList.add("hidden");
 
-        document.getElementById("spinner").style.display = "block";
-      
-      const res = await fetch("/process_image", {
-        method: "POST",
-        body: formData,
-      });
+      try {
+        const res = await fetch("/process_image", {
+          method: "POST",
+          body: formData,
+        });
+
         document.getElementById("spinner").style.display = "none";
 
-      const data = await res.json();
-      document.getElementById("output").classList.remove("hidden");
-      console.log(data);
+        if (!res.ok) {
+          throw new Error(`Server returned ${res.status}: ${res.statusText}`);
+        }
 
-        document.getElementById("extracted-text").textContent = JSON.stringify(data.extracted_text) || "No text extracted";
+        const data = await res.json();
+        document.getElementById("output").classList.remove("hidden");
+        console.log("Received data:", data);
 
-      const productsList = document.getElementById("product-names");
-      productsList.innerHTML = "";
-      (data.product_names || []).forEach(name => {
-        const li = document.createElement("li");
-        li.textContent = name;
-        productsList.appendChild(li);
-      });
-      if (data.product_names.length === 0) {
-        productsList.innerHTML = "<li>No products found</li>";
+        // Render product names
+        const productsList = document.getElementById("product-names");
+        productsList.innerHTML = "";
+        
+        const medicines = data.medicines || [];
+        if (medicines.length === 0) {
+          productsList.innerHTML = "<li>No products found</li>";
+        } else {
+          medicines.forEach((med) => {
+            const li = document.createElement("li");
+            li.textContent = med;
+            productsList.appendChild(li);
+          });
+        }
+
+        // Render invoice date
+        document.getElementById("invoice-date").textContent = data.invoice_date || "Not found";
+
+        // Render other dates
+        const otherDates = document.getElementById("other-dates");
+        otherDates.innerHTML = "";
+        
+        const dates = data.other_dates || [];
+        if (dates.length === 0) {
+          otherDates.innerHTML = "<li>No additional dates found</li>";
+        } else {
+          dates.forEach((date) => {
+            const li = document.createElement("li");
+            li.textContent = date;
+            otherDates.appendChild(li);
+          });
+        }
+
+        // Render extracted text
+        document.getElementById("extracted-text").textContent = data.extracted_text || "";
+
+        // Render full JSON output
+        document.getElementById("json-output").textContent = JSON.stringify(data, null, 2);
+
+      } catch (err) {
+        console.error("Error:", err);
+        alert("Something went wrong while processing the invoice. Please try again.");
+        document.getElementById("spinner").style.display = "none";
       }
+    });
 
-      const datesList = document.getElementById("dates");
-      datesList.innerHTML = "";
-      (data.dates || []).forEach(date => {
-        const li = document.createElement("li");
-        li.textContent = date;
-        datesList.appendChild(li);
-      });
-      if (data.dates.length === 0) {
-        datesList.innerHTML = "<li>No dates found</li>";
-      }
-
-      const jsonOutput = {
-        extracted_text: data.extracted_text || "",
-        product_names: data.product_names || [],
-        dates: data.dates || [],
-      };
-      document.getElementById("json-output").textContent = JSON.stringify(jsonOutput, null, 2);
+    // Toggle JSON output visibility
+    document.getElementById("toggle-json").addEventListener("click", () => {
+      const jsonOutput = document.getElementById("json-output");
+      jsonOutput.classList.toggle("hidden");
+    });
+    
+    // Add download text functionality
+    document.getElementById("download-text").addEventListener("click", () => {
+      const extractedText = document.getElementById("extracted-text").textContent;
+      const blob = new Blob([extractedText], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "extracted_invoice_text.txt";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     });
   </script>
 </body>
