@@ -8,5 +8,5 @@ gunicorn
 fuzzywuzzy
 paddlepaddle
 paddleocr
-dropbox
+cloudinary
 setuptools
