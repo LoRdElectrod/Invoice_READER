@@ -11,20 +11,28 @@ from PIL import Image
 import io
 from paddleocr import PaddleOCR
 import numpy as np
-import dropbox
-from dropbox.exceptions import ApiError
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
 import uuid
 
 # Load environment variables
 load_dotenv()
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
-DROPBOX_ACCESS_TOKEN = os.getenv("DROPBOX_ACCESS_TOKEN")
+CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
+CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
+CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
 
 # Initialize Together AI client
 client = Together(api_key=TOGETHER_API_KEY)
 
-# Initialize Dropbox client
-dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
+# Initialize Cloudinary
+cloudinary.config(
+    cloud_name=CLOUDINARY_CLOUD_NAME,
+    api_key=CLOUDINARY_API_KEY,
+    api_secret=CLOUDINARY_API_SECRET,
+    secure=True
+)
 
 app = Flask(__name__, template_folder="templates")
 
@@ -47,53 +55,137 @@ def image_process(file_bytes):
     gray = cv2.filter2D(gray, -1, kernel_sharpening)
     return Image.fromarray(gray)
 
-# Upload image to Dropbox and create a shared link
-def upload_to_dropbox(image_bytes):
+def compress_image(image_bytes, max_size_bytes=9*1024*1024, initial_quality=85):
+    """Compress image to ensure it's under the Cloudinary size limit"""
+    # Convert bytes to PIL Image
+    img = Image.open(image_bytes)
+    
+    # Start with a buffer to store compressed image
+    output_buffer = io.BytesIO()
+    
+    # Try with initial quality
+    quality = initial_quality
+    img.save(output_buffer, format='JPEG', quality=quality, optimize=True)
+    
+    # Continue reducing quality until we're under the limit
+    while output_buffer.tell() > max_size_bytes and quality > 20:
+        # Reset buffer and reduce quality
+        output_buffer = io.BytesIO()
+        quality -= 10
+        logging.info(f"Compressing image with quality: {quality}")
+        img.save(output_buffer, format='JPEG', quality=quality, optimize=True)
+    
+    # If still too large, resize the image
+    if output_buffer.tell() > max_size_bytes:
+        # Calculate new dimensions to reduce size
+        original_width, original_height = img.size
+        scale_factor = 0.8  # Reduce to 80% of size
+        
+        while output_buffer.tell() > max_size_bytes and scale_factor > 0.3:
+            new_width = int(original_width * scale_factor)
+            new_height = int(original_height * scale_factor)
+            
+            # Resize image
+            resized_img = img.resize((new_width, new_height), Image.LANCZOS)
+            
+            # Reset buffer and save resized image
+            output_buffer = io.BytesIO()
+            resized_img.save(output_buffer, format='JPEG', quality=quality, optimize=True)
+            
+            # Reduce scale factor for next iteration if needed
+            scale_factor -= 0.1
+            logging.info(f"Resized image to {new_width}x{new_height} with quality {quality}")
+    
+    # Reset pointer to beginning of buffer
+    output_buffer.seek(0)
+    
+    final_size_mb = output_buffer.tell() / (1024 * 1024)
+    logging.info(f"Final compressed image size: {final_size_mb:.2f} MB")
+    
+    return output_buffer
+
+def upload_to_cloudinary(image_bytes):
     try:
         # Generate a unique filename
-        unique_filename = f"/invoice_{uuid.uuid4().hex}.png"
+        unique_id = uuid.uuid4().hex
         
-        # Upload file to Dropbox
-        dbx.files_upload(image_bytes.getvalue(), unique_filename, mode=dropbox.files.WriteMode.overwrite)
+        # Compress the image before uploading to stay under 10MB limit
+        compressed_image = compress_image(image_bytes)
         
-        # Create a shared link with direct download instead of preview page
-        shared_link = dbx.sharing_create_shared_link_with_settings(
-            unique_filename,
-            dropbox.sharing.SharedLinkSettings(
-                requested_visibility=dropbox.sharing.RequestedVisibility.public
-            )
+        # Upload file to Cloudinary
+        upload_result = cloudinary.uploader.upload(
+            compressed_image.getvalue(),
+            public_id=f"invoice_{unique_id}",
+            folder="invoice_parser",
+            resource_type="image",
+            # Add these parameters to ensure proper URL access
+            access_mode="public",
+            type="upload"
         )
         
-        # Convert the standard shared link to a direct link
-        # Format: https://www.dropbox.com/s/abc123/file.png?dl=0
-        # Needs to become: https://dl.dropboxusercontent.com/s/abc123/file.png
-        url = shared_link.url
-        if '?dl=0' in url:
-            url = url.replace('?dl=0', '')
-        if 'www.dropbox.com' in url:
-            url = url.replace('www.dropbox.com', 'dl.dropboxusercontent.com')
+        # Get the secure URL for the uploaded image
+        url = upload_result['secure_url']
+        public_id = upload_result['public_id']
         
-        logging.info(f"File uploaded to Dropbox: {url}")
+        logging.info(f"File uploaded to Cloudinary with URL: {url}")
+        return url, public_id
         
-        # Debug the URL
-        try:
-            test_response = requests.head(url)
-            logging.info(f"Image URL status code: {test_response.status_code}")
-        except Exception as e:
-            logging.error(f"Error checking image URL: {e}")
-            
-        # Return both the URL and file path for later deletion
-        return url, unique_filename
-        
-    except ApiError as e:
-        logging.error(f"Dropbox API error: {e}")
-        raise Exception(f"Dropbox upload failed: {e}")
+    except Exception as e:
+        logging.error(f"Cloudinary upload error: {e}")
+        raise Exception(f"Cloudinary upload failed: {e}")
 
-# Cleanup function to delete file after processing
-def cleanup_dropbox_file(file_path):
+# Add a new function to handle image download and resizing
+def prepare_image_for_api(image_url, file_path=None):
+    """Download image from URL, resize if needed, and return a base64 encoded version"""
     try:
-        dbx.files_delete_v2(file_path)
-        logging.info(f"Successfully deleted file: {file_path}")
+        # Try to download the image
+        response = requests.get(image_url, stream=True)
+        if response.status_code != 200:
+            logging.error(f"Failed to download image: {response.status_code}")
+            # Fall back to local file
+            with open("output.png", "rb") as f:
+                img_data = f.read()
+        else:
+            img_data = response.content
+            
+        # Load image and resize if too large
+        image = Image.open(io.BytesIO(img_data))
+        
+        # Resize if the image is too large (keep aspect ratio)
+        max_size = 1024  # Maximum dimension
+        if max(image.size) > max_size:
+            ratio = max_size / max(image.size)
+            new_size = (int(image.size[0] * ratio), int(image.size[1] * ratio))
+            image = image.resize(new_size, Image.LANCZOS)
+            logging.info(f"Resized image from {image.size} to {new_size}")
+            
+        # Convert to bytes
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        buffer.seek(0)
+        
+        # Convert to base64
+        import base64
+        encoded = base64.b64encode(buffer.getvalue()).decode('utf-8')
+        return f"data:image/png;base64,{encoded}"
+        
+    except Exception as e:
+        logging.error(f"Error preparing image: {e}")
+        # Fall back to local file as base64
+        try:
+            with open("output.png", "rb") as img_file:
+                import base64
+                img_data = base64.b64encode(img_file.read()).decode('utf-8')
+                return f"data:image/png;base64,{img_data}"
+        except Exception as e2:
+            logging.error(f"Error with fallback image: {e2}")
+            raise Exception(f"Failed to prepare image: {e}")
+                
+# Cleanup function to delete file after processing
+def cleanup_cloudinary_file(public_id):
+    try:
+        cloudinary.uploader.destroy(public_id)
+        logging.info(f"Successfully deleted file: {public_id}")
     except Exception as e:
         logging.error(f"Error deleting file: {e}")
 
@@ -179,7 +271,7 @@ def index():
 
 @app.route('/process_image', methods=['POST'])
 def process_image():
-    file_path = None  # Initialize file path for cleanup
+    public_id = None  # Initialize public_id for cleanup
     
     try:
         if 'image' not in request.files:
@@ -197,11 +289,11 @@ def process_image():
 
         # Converting processed image to bytes for uploading
         image_bytes = io.BytesIO()
-        processed_image.save(image_bytes, format="PNG")
+        processed_image.save(image_bytes, format="JPEG", quality=90)
         image_bytes.seek(0)
 
-        # Upload to Dropbox for LLM to access
-        uploaded_image_url, file_path = upload_to_dropbox(image_bytes)
+        # Upload to Cloudinary for LLM to access
+        uploaded_image_url, public_id = upload_to_cloudinary(image_bytes)
 
         retry = 0
         best_response = None
@@ -269,20 +361,64 @@ def process_image():
             logging.info(f"Making API call with image URL: {uploaded_image_url}")
             
             try:
-                response = client.chat.completions.create(
-                    model="meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {"type": "image_url", "image_url": {"url": uploaded_image_url}}
-                            ]
-                        }
-                    ],
-                    temperature=current_temp,
-                    stop=["<|eot_id|>", "<|eom_id|>"]
-                )
+                # Verify image URL is accessible
+                try:
+                    response = requests.head(uploaded_image_url)
+                    if response.status_code != 200 or not response.headers.get('Content-Type', '').startswith('image/'):
+                        logging.error(f"Image URL is not accessible or not an image: {uploaded_image_url}")
+                        logging.error(f"Content-Type: {response.headers.get('Content-Type', 'unknown')}")
+                        
+                        # Fall back to base64
+                        logging.info("Preparing base64 encoded image")
+                        with open("output.png", "rb") as img_file:
+                            import base64
+                            img_data = base64.b64encode(img_file.read()).decode('utf-8')
+                            img_url = f"data:image/png;base64,{img_data}"
+                            logging.info("Using base64 encoded image")
+                    else:
+                        img_url = uploaded_image_url
+                        logging.info(f"Using Cloudinary URL: {img_url}")
+                        
+                    # Properly format the API request
+                    response = client.chat.completions.create(
+                        model="meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": prompt},
+                                    {"type": "image_url", "image_url": {"url": img_url}}
+                                ]
+                            }
+                        ],
+                        temperature=current_temp,
+                        max_tokens=4096,
+                    )
+                
+                except requests.exceptions.RequestException as url_error:
+                    logging.error(f"Error accessing image URL: {url_error}")
+                    # Fall back to base64 if URL access fails
+                    logging.info("Falling back to base64 encoded image due to URL access failure")
+                    with open("output.png", "rb") as img_file:
+                        import base64
+                        img_data = base64.b64encode(img_file.read()).decode('utf-8')
+                        img_url = f"data:image/png;base64,{img_data}"
+                    
+                    # Try API call with base64 image
+                    response = client.chat.completions.create(
+                        model="meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": prompt},
+                                    {"type": "image_url", "image_url": {"url": img_url}}
+                                ]
+                            }
+                        ],
+                        temperature=current_temp,
+                        max_tokens=4096,
+                    )
 
                 response_text = response.choices[0].message.content if response.choices else ""
                 logging.info(f"LLM Response:\n{response_text}")
@@ -339,8 +475,8 @@ def process_image():
                         result = jsonify(best_json)
                         
                         # Clean up the file before returning
-                        if file_path:
-                            cleanup_dropbox_file(file_path)
+                        if public_id:
+                            cleanup_cloudinary_file(public_id)
                             
                         return result
                 
@@ -354,12 +490,8 @@ def process_image():
 
         # When we reach max retries, return the best result we have
         if best_json:
-            output = {
-                "extracted_text": text,
-                "best_json": best_json
-            }
-            logging.info(f"Returning best result with score {best_score} after {retry} tries")
-            result = jsonify(output)
+            # Return just the best JSON instead of wrapping it
+            result = jsonify(best_json)
         else:
             logging.info("No valid JSON found after all retries, returning empty result")
             result = jsonify({
@@ -370,8 +502,8 @@ def process_image():
             })
             
         # Clean up the file before returning the result
-        if file_path:
-            cleanup_dropbox_file(file_path)
+        if public_id:
+            cleanup_cloudinary_file(public_id)
             
         return result
 
@@ -379,9 +511,9 @@ def process_image():
         logging.exception("Error in processing image")
         
         # Make sure to clean up even if we encounter an error
-        if file_path:
+        if public_id:
             try:
-                cleanup_dropbox_file(file_path)
+                cleanup_cloudinary_file(public_id)
             except Exception as cleanup_error:
                 logging.error(f"Failed to clean up file after error: {cleanup_error}")
                 
