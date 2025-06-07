@@ -3,74 +3,248 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Invoice OCR Extractor</title>
+  <title>Invoice OCR Extractor - LayoutLMv3 Powered</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 text-gray-800 font-sans min-h-screen p-4">
-  <div class="max-w-5xl mx-auto bg-white shadow-lg rounded-xl p-6 mt-8">
+  <div class="max-w-6xl mx-auto bg-white shadow-lg rounded-xl p-6 mt-8">
     <h1 class="text-3xl font-bold mb-4 text-center">Invoice Processor</h1>
+    <p class="text-center text-gray-600 mb-2">Powered by LayoutLMv3 + Llama Vision AI</p>
+    <p class="text-center text-gray-500 text-sm mb-6">Upload an invoice image to extract medicines, dates, and structured information.</p>
     
     <form id="upload-form" class="flex flex-col md:flex-row items-center gap-4 mb-6" enctype="multipart/form-data">
-      <input type="file" name="image" class="border p-2 rounded w-full md:w-auto" required />
-      <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition">
+      <div class="w-full md:w-auto flex-grow">
+        <label for="file-upload" class="flex items-center justify-center w-full border-2 border-dashed border-gray-300 rounded-lg p-6 cursor-pointer hover:bg-gray-50 transition">
+          <div class="text-center">
+            <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <div class="flex text-sm text-gray-600">
+              <span class="relative font-medium text-blue-600 hover:text-blue-500">Upload an invoice</span>
+              <p class="pl-1">or drag and drop</p>
+            </div>
+            <p class="text-xs text-gray-500">PNG, JPG, JPEG up to 10MB</p>
+          </div>
+        </label>
+        <input id="file-upload" name="image" type="file" class="sr-only" accept="image/*" required />
+      </div>
+      <button type="submit" class="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition w-full md:w-auto">
         Process Invoice
       </button>
     </form>
 
     <div class="flex items-center justify-center h-16" id="spinner" style="display:none;">
       <div class="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-      <p class="ml-4 text-gray-600">Processing invoice, please wait...</p>
+      <p class="ml-4 text-gray-600">Processing with LayoutLMv3 + Llama AI...</p>
+    </div>
+
+    <div id="preview-container" class="mb-6 hidden">
+      <h2 class="text-xl font-semibold mb-2">Preview</h2>
+      <div class="border rounded overflow-hidden">
+        <img id="image-preview" class="max-h-80 mx-auto" alt="Preview" />
+      </div>
     </div>
 
     <div id="output" class="hidden">
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <!-- Product Names Column -->
-        <div class="border rounded p-4 bg-gray-50">
-          <h2 class="text-xl font-semibold mb-2 text-green-700">📦 Product Names</h2>
-          <ul id="product-names" class="list-disc pl-5 text-sm overflow-auto max-h-80"></ul>
+      <!-- Summary Stats -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+          <div class="text-2xl font-bold text-green-600" id="total-products">0</div>
+          <div class="text-sm text-green-700">Products Found</div>
         </div>
-
-        <!-- Dates Column -->
-        <div class="border rounded p-4 bg-gray-50">
-          <h2 class="text-xl font-semibold mb-2 text-purple-700">📅 Dates</h2>
-          
-          <div class="mb-2">
-            <h3 class="font-medium text-purple-600">Invoice Date:</h3>
-            <p id="invoice-date" class="ml-4 text-sm"></p>
-          </div>
-          
-          <div>
-            <h3 class="font-medium text-purple-600">Other Dates:</h3>
-            <ul id="other-dates" class="list-disc pl-5 text-sm"></ul>
-          </div>
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+          <div class="text-2xl font-bold text-blue-600" id="invoice-date-status">❌</div>
+          <div class="text-sm text-blue-700">Invoice Date</div>
         </div>
-
-        <!-- Extracted Text Column -->
-        <div class="border rounded p-4 bg-gray-50">
-          <h2 class="text-xl font-semibold mb-2 text-blue-700">📝 Extracted Text</h2>
-          <div id="extracted-text" class="text-sm overflow-auto max-h-80 whitespace-pre-wrap"></div>
+        <div class="bg-purple-50 border border-purple-200 rounded-lg p-4 text-center">
+          <div class="text-2xl font-bold text-purple-600" id="total-dates">0</div>
+          <div class="text-sm text-purple-700">Other Dates</div>
+        </div>
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
+          <div class="text-2xl font-bold text-yellow-600" id="extraction-method">LayoutLMv3</div>
+          <div class="text-sm text-yellow-700">Method Used</div>
         </div>
       </div>
 
-      <!-- JSON Output (Hidden by default) -->
-      <div class="border rounded p-4 bg-gray-50">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <!-- Products Column -->
+        <div class="col-span-1">
+          <div class="border rounded-lg p-4 bg-gray-50 h-full">
+            <h2 class="text-xl font-semibold mb-4 text-green-700 flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+              </svg>
+              Products/Medicines
+            </h2>
+            
+            <!-- Products with Dates Table -->
+            <div id="products-with-dates-container">
+              <h3 class="font-medium text-gray-700 mb-2">Product-Date Pairs:</h3>
+              <div class="overflow-auto max-h-80">
+                <table id="products-dates-table" class="min-w-full bg-white text-sm">
+                  <thead>
+                    <tr class="bg-gray-100">
+                      <th class="py-2 px-3 text-left">Product Name</th>
+                      <th class="py-2 px-3 text-left">Associated Date</th>
+                      <th class="py-2 px-3 text-left">Additional Info</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+            
+            <!-- Simple Medicines List (Fallback) -->
+            <div id="simple-medicines-container" class="mt-4">
+              <h3 class="font-medium text-gray-700 mb-2">Medicine Names:</h3>
+              <ul id="medicine-names" class="list-disc pl-5 text-sm overflow-auto max-h-60 bg-white rounded border p-2"></ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dates & Text Column -->
+        <div class="col-span-1">
+          <div class="grid grid-cols-1 gap-4">
+            <!-- Dates Section -->
+            <div class="border rounded-lg p-4 bg-gray-50">
+              <h2 class="text-xl font-semibold mb-4 text-purple-700 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                Detected Dates
+              </h2>
+              
+              <div class="mb-3">
+                <h3 class="font-medium text-purple-600">Invoice Date:</h3>
+                <p id="invoice-date" class="ml-4 text-sm p-2 bg-white rounded border"></p>
+              </div>
+              
+              <div class="mb-3">
+                <h3 class="font-medium text-purple-600">All Dates Found:</h3>
+                <ul id="all-dates-found" class="list-disc pl-5 text-sm max-h-40 overflow-auto bg-white rounded border p-2"></ul>
+              </div>
+              
+              <div>
+                <h3 class="font-medium text-purple-600">Other Dates:</h3>
+                <ul id="other-dates" class="list-disc pl-5 text-sm max-h-40 overflow-auto bg-white rounded border p-2"></ul>
+              </div>
+            </div>
+
+            <!-- Extracted Text Section -->
+            <div class="border rounded-lg p-4 bg-gray-50">
+              <div class="flex justify-between items-center mb-2">
+                <h2 class="text-xl font-semibold text-blue-700 flex items-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  Extracted Text
+                </h2>
+                <button id="download-text" class="text-sm bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 transition flex items-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Download
+                </button>
+              </div>
+              <div id="extracted-text" class="text-sm overflow-auto h-40 whitespace-pre-wrap bg-white rounded border p-2"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- JSON Output -->
+      <div class="border rounded-lg p-4 bg-gray-50">
         <div class="flex justify-between items-center mb-2">
-          <h2 class="text-xl font-semibold text-gray-700">🧾 JSON Output</h2>
-          <button id="toggle-json" class="text-sm bg-gray-200 px-2 py-1 rounded hover:bg-gray-300">Show/Hide</button>
+          <h2 class="text-xl font-semibold text-gray-700 flex items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+            </svg>
+            Structured JSON Output
+          </h2>
+          <div class="flex gap-2">
+            <button id="copy-json" class="text-sm bg-blue-100 text-blue-700 px-3 py-1 rounded hover:bg-blue-200 transition flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              Copy
+            </button>
+            <button id="toggle-json" class="text-sm bg-gray-200 px-3 py-1 rounded hover:bg-gray-300 transition">
+              Show/Hide
+            </button>
+          </div>
         </div>
-        <pre id="json-output" class="whitespace-pre-wrap text-xs bg-white border rounded p-2 overflow-auto max-h-80 hidden"></pre>
-      </div>
-      
-      <!-- Download Text Button -->
-      <div class="mt-4 flex justify-end">
-        <button id="download-text" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition">
-          Download Extracted Text
-        </button>
+        <pre id="json-output" class="whitespace-pre-wrap text-xs bg-white border rounded p-3 overflow-auto max-h-60 hidden"></pre>
       </div>
     </div>
   </div>
 
+  <footer class="text-center text-gray-500 text-sm mt-8 mb-4">
+    © 2025 Invoice OCR Extractor - Powered by LayoutLMv3 + Llama Vision
+  </footer>
+
   <script>
+    // File upload preview functionality
+    const fileUpload = document.getElementById("file-upload");
+    const imagePreview = document.getElementById("image-preview");
+    const previewContainer = document.getElementById("preview-container");
+    
+    fileUpload.addEventListener("change", function() {
+      if (this.files && this.files[0]) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          imagePreview.src = e.target.result;
+          previewContainer.classList.remove("hidden");
+        };
+        reader.readAsDataURL(this.files[0]);
+      }
+    });
+
+    // Drag and drop functionality
+    const dropZone = document.querySelector('label[for="file-upload"]');
+    
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+      dropZone.addEventListener(eventName, preventDefaults, false);
+    });
+    
+    function preventDefaults(e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    ['dragenter', 'dragover'].forEach(eventName => {
+      dropZone.addEventListener(eventName, highlight, false);
+    });
+    
+    ['dragleave', 'drop'].forEach(eventName => {
+      dropZone.addEventListener(eventName, unhighlight, false);
+    });
+    
+    function highlight() {
+      dropZone.classList.add('border-blue-500', 'bg-blue-50');
+    }
+    
+    function unhighlight() {
+      dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+    }
+    
+    dropZone.addEventListener('drop', handleDrop, false);
+    
+    function handleDrop(e) {
+      const dt = e.dataTransfer;
+      const files = dt.files;
+      fileUpload.files = files;
+      
+      if (files && files[0]) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          imagePreview.src = e.target.result;
+          previewContainer.classList.remove("hidden");
+        };
+        reader.readAsDataURL(files[0]);
+      }
+    }
+
+    // Form submission and processing
     document.getElementById("upload-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const formData = new FormData(e.target);
@@ -94,33 +268,95 @@
         document.getElementById("output").classList.remove("hidden");
         console.log("Received data:", data);
 
-        // Render product names
-        const productsList = document.getElementById("product-names");
-        productsList.innerHTML = "";
+        // Update summary stats
+        document.getElementById("total-products").textContent = data.total_products || 0;
+        document.getElementById("invoice-date-status").textContent = data.invoice_date ? "✅" : "❌";
+        document.getElementById("total-dates").textContent = (data.all_dates_found || []).length;
+        
+        // Update extraction method indicator
+        const extractionMethod = document.getElementById("extraction-method");
+        if (data.extraction_info && data.extraction_info.fallback_used) {
+          extractionMethod.textContent = "EasyOCR";
+          extractionMethod.parentElement.classList.remove("bg-yellow-50", "border-yellow-200");
+          extractionMethod.parentElement.classList.add("bg-orange-50", "border-orange-200");
+          extractionMethod.classList.remove("text-yellow-600");
+          extractionMethod.classList.add("text-orange-600");
+        }
+
+        // Handle new structured products format
+        if (data.products && data.products.length > 0) {
+          // Render products with dates table
+          const productsTable = document.getElementById("products-dates-table").querySelector("tbody");
+          productsTable.innerHTML = "";
+          
+          data.products.forEach(product => {
+            const row = document.createElement("tr");
+            row.classList.add("border-b", "hover:bg-gray-50");
+            
+            // Extract additional info
+            const additionalInfo = [];
+            Object.keys(product).forEach(key => {
+              if (key !== 'product_name' && key !== 'date' && product[key]) {
+                additionalInfo.push(`${key}: ${product[key]}`);
+              }
+            });
+            
+            row.innerHTML = `
+              <td class="py-2 px-3 font-medium">${escapeHtml(product.product_name || 'Unknown')}</td>
+              <td class="py-2 px-3 text-sm ${product.date ? 'text-green-600' : 'text-gray-400'}">${escapeHtml(product.date || 'No date')}</td>
+              <td class="py-2 px-3 text-xs text-gray-600">${additionalInfo.join(', ')}</td>
+            `;
+            
+            productsTable.appendChild(row);
+          });
+          
+          document.getElementById("products-with-dates-container").classList.remove("hidden");
+        } else {
+          document.getElementById("products-with-dates-container").classList.add("hidden");
+        }
+
+        // Handle medicines array (fallback or alternative format)
+        const medicinesList = document.getElementById("medicine-names");
+        medicinesList.innerHTML = "";
         
         const medicines = data.medicines || [];
         if (medicines.length === 0) {
-          productsList.innerHTML = "<li>No products found</li>";
+          medicinesList.innerHTML = "<li class='text-gray-500 italic'>No medicines found</li>";
         } else {
           medicines.forEach((med) => {
             const li = document.createElement("li");
             li.textContent = med;
-            productsList.appendChild(li);
+            medicinesList.appendChild(li);
           });
         }
 
         // Render invoice date
         document.getElementById("invoice-date").textContent = data.invoice_date || "Not found";
 
+        // Render all dates found (new field)
+        const allDatesFound = document.getElementById("all-dates-found");
+        allDatesFound.innerHTML = "";
+        
+        const allDates = data.all_dates_found || [];
+        if (allDates.length === 0) {
+          allDatesFound.innerHTML = "<li class='text-gray-500 italic'>No dates extracted</li>";
+        } else {
+          allDates.forEach((date) => {
+            const li = document.createElement("li");
+            li.textContent = date;
+            allDatesFound.appendChild(li);
+          });
+        }
+
         // Render other dates
         const otherDates = document.getElementById("other-dates");
         otherDates.innerHTML = "";
         
-        const dates = data.other_dates || [];
-        if (dates.length === 0) {
-          otherDates.innerHTML = "<li>No additional dates found</li>";
+        const otherDatesArray = data.other_dates || [];
+        if (otherDatesArray.length === 0) {
+          otherDates.innerHTML = "<li class='text-gray-500 italic'>No additional dates found</li>";
         } else {
-          dates.forEach((date) => {
+          otherDatesArray.forEach((date) => {
             const li = document.createElement("li");
             li.textContent = date;
             otherDates.appendChild(li);
@@ -140,10 +376,46 @@
       }
     });
 
+    // Helper function to escape HTML
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
     // Toggle JSON output visibility
     document.getElementById("toggle-json").addEventListener("click", () => {
       const jsonOutput = document.getElementById("json-output");
       jsonOutput.classList.toggle("hidden");
+    });
+    
+    // Copy JSON to clipboard
+    document.getElementById("copy-json").addEventListener("click", () => {
+      const jsonContent = document.getElementById("json-output").textContent;
+      navigator.clipboard.writeText(jsonContent).then(() => {
+        const button = document.getElementById("copy-json");
+        button.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+          Copied!
+        `;
+        button.classList.add("bg-green-100", "text-green-700");
+        
+        setTimeout(() => {
+          button.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            Copy
+          `;
+          button.classList.remove("bg-green-100", "text-green-700");
+        }, 2000);
+      });
     });
     
     // Add download text functionality
